@@ -1,0 +1,71 @@
+name: Sync Docs to Central Repository
+
+on:
+  push:
+    branches:
+      - main
+      - 'release-*'
+
+env:
+  PRODUCT_NAME: sample-doc-md  # CHANGE THIS for each product repo
+  DOCS_REPO: sajokanya/sample-doc-mdx  # CHANGE THIS to your actual docs repository (format: owner/repo-name)
+  SOURCE_DOCS_PATH: docs/product-b  # Path to docs folder in this repo (usually just 'docs')
+
+jobs:
+  sync-docs:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout product repository
+        uses: actions/checkout@v4
+        with:
+          path: product-repo
+      
+      - name: Determine version from branch
+        id: version
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          if [ "$BRANCH_NAME" = "main" ]; then
+            VERSION="latest"
+          else
+            # Extract version from release-X.Y branch name (e.g., release-1.0 → 1.0)
+            VERSION="${BRANCH_NAME#release-}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Syncing to version: $VERSION"
+      
+      - name: Checkout docs repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DOCS_REPO }}
+          token: ${{ secrets.DOCS_REPO_TOKEN }}
+          path: docs-repo
+      
+      - name: Sync documentation files
+        run: |
+          # Create target directory (e.g., docs/product-a/latest or docs/product-a/1.0)
+          TARGET_DIR="docs-repo/docs/${{ env.PRODUCT_NAME }}/${{ steps.version.outputs.version }}"
+          mkdir -p "$TARGET_DIR"
+          
+          # Remove old content and copy new docs
+          rm -rf "$TARGET_DIR"/*
+          cp -r product-repo/${{ env.SOURCE_DOCS_PATH }}/* "$TARGET_DIR"/
+          
+          echo "Synced docs to $TARGET_DIR"
+      
+      - name: Commit and push changes
+        working-directory: docs-repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add .
+          
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Sync ${{ env.PRODUCT_NAME }} docs (version ${{ steps.version.outputs.version }})"
+            git push
+            echo "Changes pushed successfully"
+          fi
